@@ -55,6 +55,19 @@ static int update_state(bool charging_new_state, bool worn_new_state)
 {
 	int err;
 
+	if ((device_state == DEVICE_STATE_INIT) && !charging && !worn)
+	{
+		// Initialize the green LED to a low value to indicate that the device is still working
+		err = ppg_set_led_pa(PPG_LED_GREEN, 5);
+		if (err)
+		{
+			LOG_ERR("Failed to set PPG LED PA for LED %d", PPG_LED_GREEN);
+			return err;
+		}
+
+		device_state = DEVICE_STATE_NOT_WORN_NOT_CHARGING;
+	}
+
 	if (charging_new_state == charging && worn_new_state == worn)
 	{
 		// No change, do nothing
@@ -153,6 +166,14 @@ static int update_state(bool charging_new_state, bool worn_new_state)
 			{
 				// Worn stopped while not charging
 				device_state = DEVICE_STATE_NOT_WORN_NOT_CHARGING;
+
+				// Set the green LED to a low value to indicate that the device is still working
+				err = ppg_set_led_pa(PPG_LED_GREEN, 5);
+				if (err)
+				{
+					LOG_ERR("Failed to disable PPG LED PA for LED %d", PPG_LED_GREEN);
+					return err;
+				}
 			}
 		}
 	}
