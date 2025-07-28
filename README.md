@@ -23,7 +23,7 @@ command:
 
 ```shell
 # initialize tgm_firmware workspace for the tgm_firmware application (main branch)
-west init -m https://github.com/johnacogan67/tgm_firmware.git --mr main tgm_firmware
+west init -m https://github.com/johna67/tgm_firmware --mr main tgm_firmware
 # update nRF Connect SDK modules
 cd tgm_firmware
 west update
