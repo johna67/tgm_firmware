@@ -281,6 +281,11 @@ int main(void)
 
 	printk("TGM Application %s\n", APP_VERSION_STRING);
 
+	/* CRITICAL: Battery power latch MUST be first - before ANY returns */
+	gpio_pin_configure(DEVICE_DT_GET(DT_NODELABEL(gpio0)), 10, GPIO_OUTPUT);
+	gpio_pin_set(DEVICE_DT_GET(DT_NODELABEL(gpio0)), 10, 1);
+	printk("*** BATTERY POWER ENABLED ON P0.10 ***\n");
+
 	// Initialize the gpio port
 	if (!device_is_ready(gpio))
 	{
