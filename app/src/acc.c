@@ -15,7 +15,7 @@ LOG_MODULE_REGISTER(acc, CONFIG_APP_LOG_LEVEL);
 static struct gpio_callback acc_int_cb;
 static struct k_work read_acc_data_work;
 
-#if CONFIG_LIS2DTW12
+#ifdef CONFIG_LIS2DTW12
 #include <app/drivers/lis2dtw12.h>
 
 #define LIS2DTW12_NODE DT_NODELABEL(lis2dtw12)

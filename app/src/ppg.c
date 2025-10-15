@@ -82,77 +82,45 @@ static void ppg_read_data(struct k_work *work)
     return;
 }
 
-// app/src/ppg.c
-#include "ppg.h"
-#include <zephyr/logging/log.h>
-
-LOG_MODULE_REGISTER(ppg, CONFIG_PPG_LOG_LEVEL);
-
-// Masseter-specific configuration constants
-#define MASSETER_LED_RED_CURRENT    0x1F    // 6.2mA - lower for thin tissue
-#define MASSETER_LED_IR_CURRENT     0x2F    // 9.4mA - better penetration
-#define MASSETER_LED_GREEN_CURRENT  0x1F    // 6.2mA - surface monitoring
-#define MASSETER_SAMPLE_RATE        25      // 25Hz optimal for jaw activity
-#define MASSETER_FIFO_THRESHOLD     15      // Trigger at 15 samples (600ms)
-
 int ppg_init(void)
 {
-    int err;
-    
-    LOG_INF("Initializing PPG sensor for masseter monitoring");
-    
-    // Initialize MAXM86161
-    err = maxm86161_init();
-    if (err) {
-        LOG_ERR("MAXM86161 init failed: %d", err);
+    // Initialize the I2C bus
+    if (!i2c_is_ready_dt(&i2c))
+    {
+        LOG_ERR("I2C device not ready during initialization of PPG sensor");
+        return -ENODEV;
+    }
+
+    // Initialize the GPIO port
+    if (!gpio_is_ready_dt(&ppg_int))
+    {
+        LOG_ERR("GPIO device not ready during initialization of PPG sensor");
+        return -ENODEV;
+    }
+
+    // Intialize the int pin as input
+    int err = gpio_pin_configure_dt(&ppg_int, GPIO_INPUT);
+    if (err)
+    {
+        LOG_ERR("Failed to configure PPG sensor int pin as input");
         return err;
     }
-    
-    // Configure LED currents for masseter (thin cheek tissue)
-    // Lower power = better battery life
-    err = maxm86161_write_reg(MAXM86161_REG_LED1_PA, MASSETER_LED_RED_CURRENT);
-    if (err) {
-        LOG_ERR("Failed to set RED LED current: %d", err);
+
+    // Initialize the interrupt callback
+    gpio_init_callback(&ppg_int_cb, ppg_int_handler, BIT(ppg_int.pin));
+    err = gpio_add_callback(ppg_int.port, &ppg_int_cb);
+    if (err)
+    {
+        LOG_ERR("Failed to add callback to PPG sensor int pin");
         return err;
     }
-    
-    err = maxm86161_write_reg(MAXM86161_REG_LED2_PA, MASSETER_LED_IR_CURRENT);
-    if (err) {
-        LOG_ERR("Failed to set IR LED current: %d", err);
-        return err;
-    }
-    
-    err = maxm86161_write_reg(MAXM86161_REG_LED3_PA, MASSETER_LED_GREEN_CURRENT);
-    if (err) {
-        LOG_ERR("Failed to set GREEN LED current: %d", err);
-        return err;
-    }
-    
-    // Set sample rate to 25Hz (battery efficient)
-    // Register value: 0x27 = 25Hz, 18-bit resolution
-    err = maxm86161_write_reg(MAXM86161_REG_SPO2_CONFIG, 0x27);
-    if (err) {
-        LOG_ERR("Failed to set sample rate: %d", err);
-        return err;
-    }
-    
-    // Configure FIFO to minimize interrupts (battery saving)
-    // Trigger when 15 samples are ready (600ms @ 25Hz)
-    uint8_t fifo_threshold = 128 - (MASSETER_FIFO_THRESHOLD * 3);  // 3 channels
-    err = maxm86161_write_reg(MAXM86161_REG_FIFO_CONFIG, fifo_threshold);
-    if (err) {
-        LOG_ERR("Failed to configure FIFO: %d", err);
-        return err;
-    }
-    
-    LOG_INF("PPG configured: 25Hz, LEDs optimized for masseter");
-    LOG_INF("  RED: %d (6.2mA), IR: %d (9.4mA), GREEN: %d (6.2mA)",
-            MASSETER_LED_RED_CURRENT, MASSETER_LED_IR_CURRENT, MASSETER_LED_GREEN_CURRENT);
-    
+
+    // Initialize the work item
+    k_work_init(&read_ppg_data_work, ppg_read_data);
+    k_work_init(&ppg_reg_work.reg_work, ppg_reg_work_handler);
+
     return 0;
 }
-
-// Keep all other existing ppg.c functions unchanged
 
 int ppg_start(void)
 {
