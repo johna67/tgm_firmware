@@ -386,8 +386,19 @@ int main(void)
 		LOG_ERR("Failed to start the accelerometer sensor with error %d", err);
 	}
 
-	// Start the temperature monitoring
-	k_work_reschedule(&temperature_work, K_NO_WAIT);
+    // Start the temperature monitoring
+    k_work_reschedule(&temperature_work, K_NO_WAIT);
+    LOG_INF("Temperature monitoring started");
+
+    LOG_INF("=== INITIALIZATION COMPLETE ===");
+    
+    // NEW: Power management loop
+    // Sensors run autonomously via interrupts and send data via BLE
+    // Main loop just needs to stay alive
+    while (1) {
+        // Sleep to save power - wake every 1 second to maintain BLE connection
+        k_sleep(K_SECONDS(1));
+    }
 
 	return 0;
 }
