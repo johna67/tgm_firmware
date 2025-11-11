@@ -1,0 +1,199 @@
+================================================================================
+TGM FIRMWARE - CONFIGURABLE PARAMETERS OVERVIEW
+================================================================================
+
+CURRENT STATE:
+  - Most parameters are COMPILE-TIME only (Kconfig/prj.conf)
+  - Very limited RUNTIME configuration (only PPG register read/write)
+  - NO persistent storage (NVS/Flash disabled)
+  - State machine uses HARDCODED LED intensities and temperature thresholds
+
+================================================================================
+COMPILE-TIME CONFIGURABLE (Kconfig in prj.conf)
+================================================================================
+
+✓ CONFIG_PPG_SAMPLES_PER_FRAME=20          → Samples per PPG frame
+✓ CONFIG_ACC_SAMPLES_PER_FRAME=25          → Samples per accelerometer frame
+✓ CONFIG_TEMPERATURE_MEASUREMENT_INTERVAL=1   → How often to read temperature
+✓ CONFIG_BATTERY_MEASUREMENT_INTERVAL=300     → How often to measure battery
+✓ CONFIG_BT_DEVICE_NAME="Oralable"            → Bluetooth device name
+✓ CONFIG_MAXM86161=y                          → PPG sensor driver enabled
+✓ CONFIG_LIS2DTW12=y                          → Accelerometer driver enabled
+✓ CONFIG_LOG=y                                → Logging level
+
+================================================================================
+RUNTIME CONFIGURABLE (Currently exists via BLE)
+================================================================================
+
+✓ PPG Register Read/Write (UUIDs 0x3a0ff007/0x3a0ff008)
+  - Can adjust any PPG sensor register
+  - Requires knowledge of MAXM86161 register map
+  - Limited to one register at a time
+
+✗ LED Pulse Amplitudes                   (HARDCODED - NOT configurable)
+✗ Temperature Thresholds                 (HARDCODED - NOT configurable)
+✗ Measurement Intervals                  (Compile-time only - NOT runtime configurable)
+✗ Sensor Sampling Rates                  (Hardcoded in driver - NOT runtime configurable)
+✗ Persistent Configuration Storage       (Disabled - NOT available)
+
+================================================================================
+HARDCODED VALUES (Should be runtime configurable)
+================================================================================
+
+FILE: /app/src/main.c (lines 25-26)
+  #define DEVICE_WORN_TEMPERATURE_THRESHOLD 2550     // 25.50°C
+  #define DEVICE_NOT_WORN_TEMPERATURE_THRESHOLD 2450 // 24.50°C
+  → Determines when device is "worn" vs "off-skin"
+  → Currently fixed at 25.5°C worn, 24.5°C not-worn
+
+FILE: /app/src/main.c (lines 61-171 in update_state function)
+  ppg_set_led_pa(PPG_LED_GREEN, 5);   // Idle indicator (low power)
+  ppg_set_led_pa(PPG_LED_GREEN, 32);  // Charging indicator
+  ppg_set_led_pa(PPG_LED_RED, 32);    // Worn - Red LED
+  ppg_set_led_pa(PPG_LED_IR, 128);    // Worn - IR LED (HIGHEST POWER CONSUMER)
+  → All values hardcoded in state machine
+  → Cannot change without recompiling
+
+FILE: /app/src/battery.c (line 88)
+  k_work_reschedule(..., K_SECONDS(CONFIG_BATTERY_MEASUREMENT_INTERVAL));
+  → Only configurable at compile-time via Kconfig
+
+FILE: /app/src/main.c (line 203 & 230)
+  k_work_reschedule(..., K_SECONDS(CONFIG_TEMPERATURE_MEASUREMENT_INTERVAL));
+  → Only configurable at compile-time via Kconfig
+
+FILE: /app/src/main.c (line 400)
+  k_sleep(K_SECONDS(1));  // Main loop sleep
+  → HARDCODED - cannot change at runtime
+
+================================================================================
+HIGHEST IMPACT OPTIMIZATIONS (if made configurable)
+================================================================================
+
+1. IR LED INTENSITY (Biggest Power Impact)
+   Current: 128 (produces ~15.4mA)
+   Optimal Range: 64-96 (saves ~5mA)
+   Expected Impact: 20-30% power reduction
+
+2. MEASUREMENT INTERVALS (Medium Impact)
+   Temperature: 1s (could increase to 10-60s when not wearing)
+   Battery: 300s (could increase to 600-3600s)
+   Expected Impact: 10-15% power reduction
+
+3. SENSOR SAMPLING RATES (Medium Impact)
+   PPG: 50Hz (could reduce to 25Hz)
+   ACC: 50Hz (could reduce to 25Hz when not moving)
+   Expected Impact: 15-20% sensor power reduction
+
+4. TEMPERATURE THRESHOLDS (Quality Impact)
+   Worn/not-worn hysteresis prevents LED flicker
+   Currently fixed: 25.5°C / 24.5°C
+   Should adapt to individual user patterns
+
+================================================================================
+BLE CHARACTERISTIC SUMMARY
+================================================================================
+
+SERVICE UUID: 3a0ff000-98c4-46b2-94af-1aee0fd4c48e
+
+CURRENT CHARACTERISTICS:
+┌─ UUID 0x3a0ff001 (NOTIFY)  ─ PPG Data
+│  └─ Contains: Red, IR, Green samples + frame counter
+├─ UUID 0x3a0ff002 (NOTIFY)  ─ Accelerometer Data
+│  └─ Contains: X, Y, Z accelerometer samples + frame counter
+├─ UUID 0x3a0ff003 (NOTIFY)  ─ Temperature Data
+│  └─ Contains: Temperature in centidegrees + frame counter
+├─ UUID 0x3a0ff004 (READ)    ─ Battery Voltage (mV)
+├─ UUID 0x3a0ff005 (READ)    ─ Device UUID (unique ID)
+├─ UUID 0x3a0ff006 (READ)    ─ Firmware Version
+├─ UUID 0x3a0ff007 (WRITE)   ─ Read PPG Register
+│  └─ Input: 1 byte (register address)
+│  └─ Output: 1 byte (register value) via notification
+└─ UUID 0x3a0ff008 (WRITE)   ─ Write PPG Register
+   └─ Input: 2 bytes (register address + value)
+   └─ Output: 1 byte (written value) via notification
+
+RECOMMENDED NEW CHARACTERISTICS:
+┌─ UUID 0x3a0ff100 (READ/WRITE) ─ LED Configuration
+│  └─ Input: 3 bytes [Green PA, Red PA, IR PA] (0-255 each)
+│  └─ Output: 3 bytes (echo current values)
+├─ UUID 0x3a0ff101 (READ/WRITE) ─ Temperature Thresholds
+│  └─ Input: 4 bytes [Worn threshold, Not-worn threshold] (little-endian int16)
+│  └─ Output: 4 bytes (echo current values)
+└─ UUID 0x3a0ff102 (READ/WRITE) ─ Measurement Intervals
+   └─ Input: 4 bytes [Temp interval secs, Battery interval secs] (little-endian uint16)
+   └─ Output: 4 bytes (echo current values)
+
+================================================================================
+IMPLEMENTATION PRIORITY
+================================================================================
+
+PHASE 1: LED POWER CONTROL (HIGHEST PRIORITY)
+  Effort: 2-3 hours
+  Impact: 20-30% power reduction
+  Files to modify:
+    - /app/src/main.c (replace hardcoded values with variables)
+    - /app/src/tgm_service.c (add LED config characteristic)
+    - /app/src/tgm_service.h (add UUID)
+
+PHASE 2: TEMPERATURE THRESHOLDS (HIGH PRIORITY)
+  Effort: 1-2 hours
+  Impact: Better user experience, prevent LED flicker
+  Files to modify:
+    - /app/src/main.c (replace #defines with runtime variables)
+    - /app/src/tgm_service.c (add temp threshold characteristic)
+    - /app/src/tgm_service.h (add UUID)
+
+PHASE 3: MEASUREMENT INTERVALS (MEDIUM PRIORITY)
+  Effort: 1-2 hours
+  Impact: 10-15% power reduction
+  Files to modify:
+    - /app/src/battery.c (add interval variable)
+    - /app/src/main.c (add interval variable, add characteristic)
+    - /app/src/tgm_service.c (add interval config characteristic)
+
+PHASE 4: PERSISTENT STORAGE (FUTURE)
+  Effort: 3-4 hours
+  Impact: Configuration survives power cycles
+  Requires:
+    - Enable NVS (CONFIG_FLASH=y, CONFIG_FLASH_MAP=y)
+    - Implement settings save/load
+    - Add factory reset functionality
+
+PHASE 5: ADVANCED FEATURES (FUTURE)
+  - Configuration presets (power saving, balanced, performance)
+  - Auto-adjustment based on data quality
+  - Contextual profiles (exercise, sleep, etc.)
+
+================================================================================
+POWER CONSUMPTION ESTIMATES
+================================================================================
+
+Current Configuration (Worn State):
+  IR LED (PPG):           ~15.4 mA  ← HIGHEST (configurable 128→64 = -7.7mA)
+  Red LED (PPG):          ~3.8 mA   (configurable)
+  Green LED (PPG):        ~0.6 mA   (configurable)
+  PPG Sensor:             ~3.0 mA   (configurable via sampling rate)
+  Accelerometer:          ~0.04 mA  (configurable via sampling rate)
+  BLE Radio:              ~5.0 mA   (always active when connected)
+  MCU Core:               ~3.0 mA   (depends on active work)
+  ──────────────────────────────────
+  TOTAL:                  ~28-30 mA
+
+Potential with Optimizations:
+  If IR LED: 128→64 PA        ≈ -7.7 mA
+  If PPG rate: 50Hz→25Hz      ≈ -1.5 mA
+  If temp interval: 1s→10s    ≈ -0.3 mA
+  ──────────────────────────────────
+  OPTIMIZED TOTAL:            ~18-19 mA (35-40% reduction)
+
+================================================================================
+QUICK REFERENCE FILES
+================================================================================
+
+Complete Analysis:    /home/user/tgm_firmware/FIRMWARE_ANALYSIS.md
+Quick Reference:      /home/user/tgm_firmware/CONFIGURATION_QUICK_REFERENCE.md
+Code Locations:       /home/user/tgm_firmware/CODE_LOCATIONS_REFERENCE.md
+This Overview:        /home/user/tgm_firmware/CONFIGURATION_OVERVIEW.txt
+
+================================================================================
